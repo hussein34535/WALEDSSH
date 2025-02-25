@@ -1,22 +1,34 @@
 import 'package:flutter/material.dart';
-import 'package:vpn_client/home_screen.dart';
+import 'package:provider/provider.dart';
+import 'package:vpn_client/pages/main/main_page.dart';
+import 'package:vpn_client/theme_provider.dart';
+
+import 'design/colors.dart';
 
 void main() {
-  runApp(const MyApp());
+
+  runApp(
+    ChangeNotifierProvider(
+      create: (_) => ThemeProvider(),
+      child: const App(),
+    ),
+  );
 }
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+class App extends StatelessWidget {
+  const App({super.key});
 
-  // This widget is the root of your application.
   @override
   Widget build(BuildContext context) {
+    final themeProvider = Provider.of<ThemeProvider>(context);
+
     return MaterialApp(
-      title: 'Flutter Demo',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
-      ),
-      home: const HomeScreen(),
+      debugShowCheckedModeBanner: false,
+      title: 'VPN Client',
+      theme: lightTheme,
+      darkTheme: darkTheme,
+      themeMode: themeProvider.themeMode,
+      home: const HomePage(),
     );
   }
 }
