@@ -1,8 +1,7 @@
 import 'package:flutter_svg/flutter_svg.dart';
 
-final SvgPicture homeIcon = SvgPicture.asset('assets/images/home.svg');
-final SvgPicture appIcon = SvgPicture.asset('assets/images/app.svg');
-final SvgPicture serverIcon = SvgPicture.asset('assets/images/server.svg');
-final SvgPicture settingsIcon = SvgPicture.asset('assets/images/settings.svg');
-final SvgPicture speedIcon = SvgPicture.asset('assets/images/speed.svg');
-final SvgPicture deFlag = SvgPicture.asset('assets/images/de.svg');
+final SvgPicture powerBtnImage = SvgPicture.asset('assets/power.svg');
+final SvgPicture settingBtnImage = SvgPicture.asset('assets/settings.svg');
+final SvgPicture shareBtnImage = SvgPicture.asset('assets/share.svg');
+final SvgPicture menuBtnImage = SvgPicture.asset('assets/menu.svg');
+final SvgPicture crownBtnImage = SvgPicture.asset('assets/crown.svg');
