@@ -1,6 +1,15 @@
-# vpn_client
+# VPN Client Application
 
-A new Flutter project.
+VPN Client Application is VPN Client UI + VPN Client Controller
+
+Supported platforms
+* iOS 15+ (iPhone, iPad, MacOS M)
+* Android
+* MacOS Intel (later)
+* Windows (later)
+* Ubuntu (later)
+
+![VPN Client Controller](https://raw.githubusercontent.com/VPNclient/.github/refs/heads/main/assets/vpnclient_scheme2.png)
 
 ## Getting Started
 
