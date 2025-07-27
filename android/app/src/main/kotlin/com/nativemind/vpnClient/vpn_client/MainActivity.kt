@@ -1,17 +1,16 @@
-package com.nativemind.vpnClient.vpn_client
+package com.waled.net
 
-import io.flutter.embedding.android.FlutterFragmentActivity
+import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugins.GeneratedPluginRegistrant
 import android.os.Build
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
 
-class MainActivity: FlutterFragmentActivity() {
+class MainActivity: FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        // GeneratedPluginRegistrant.registerWith(flutterEngine) is called automatically by FlutterFragmentActivity.
-        // Calling it manually here causes plugins to be registered twice, causing the warning.
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channelId = "v2ray_notification_channel"

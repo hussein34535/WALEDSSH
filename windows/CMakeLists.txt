@@ -1,10 +1,9 @@
 # Project-level configuration.
 cmake_minimum_required(VERSION 3.14)
-project(vpn_client LANGUAGES CXX)
+project(WaledNet LANGUAGES CXX)
 
-# The name of the executable created for the application. Change this to change
-# the on-disk name of your application.
-set(BINARY_NAME "vpn_client")
+# The name of the executable to be created.
+set(BINARY_NAME "WaledNet")
 
 # Explicitly opt in to modern CMake behaviors to avoid warnings with recent
 # versions of CMake.

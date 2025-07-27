@@ -87,15 +87,15 @@ VS_VERSION_INFO VERSIONINFO
 BEGIN
     BLOCK "StringFileInfo"
     BEGIN
-        BLOCK "040904e4"
+        BLOCK "040904b0"
         BEGIN
-            VALUE "CompanyName", "com.nativemind.vpnClient" "\0"
-            VALUE "FileDescription", "vpn_client" "\0"
+            VALUE "CompanyName", "com.waled.net" "\0"
+            VALUE "FileDescription", "WaledNet" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "vpn_client" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2025 com.nativemind.vpnClient. All rights reserved." "\0"
-            VALUE "OriginalFilename", "vpn_client.exe" "\0"
-            VALUE "ProductName", "vpn_client" "\0"
+            VALUE "InternalName", "WaledNet" "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2024 com.waled.net. All rights reserved." "\0"
+            VALUE "OriginalFilename", "WaledNet.exe" "\0"
+            VALUE "ProductName", "WaledNet" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

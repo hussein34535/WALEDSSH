@@ -1,6 +1,6 @@
 {
-    "name": "vpn_client",
-    "short_name": "vpn_client",
+    "name": "WaledNet",
+    "short_name": "WaledNet",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",

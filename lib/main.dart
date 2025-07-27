@@ -1,20 +1,33 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_v2ray/flutter_v2ray.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:vpn_client/data/servers.dart';
-import 'package:vpn_client/services/api_service.dart';
-import 'package:vpn_client/theme_provider.dart';
+import 'package:WaledNet/data/servers.dart';
+import 'package:WaledNet/services/api_service.dart';
+import 'package:WaledNet/theme_provider.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:unity_ads_plugin/unity_ads_plugin.dart';
+import 'package:dio/dio.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 
-void main() {
+Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  await Firebase.initializeApp();
+  print('Handling a background message ${message.messageId}');
+}
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp();
+  FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+
   runApp(
     ChangeNotifierProvider(
       create: (context) => ThemeProvider(),
@@ -29,7 +42,7 @@ class VpnApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'WALEDSSH VPN',
+      title: 'WaledNet VPN',
       theme: Provider.of<ThemeProvider>(context).themeData,
       home: const UpdateCheckPage(),
       debugShowCheckedModeBanner: false,
@@ -153,7 +166,7 @@ class MyHomePage extends StatefulWidget {
 class _MyHomePageState extends State<MyHomePage> {
   late final FlutterV2ray _flutterV2ray;
   V2RayStatus? _status;
-  String _buttonText = 'Connect';
+  String _buttonText = 'اتصال';
   bool _isLoading = true;
   String _remark = '';
   Map<String, dynamic> _config = {};
@@ -167,23 +180,22 @@ class _MyHomePageState extends State<MyHomePage> {
   bool _isShowingAd = false;
   bool _isAdLoading = false;
   bool _adLoadAttempted = false;
-
-  // -- متغيرات تسجيل أعلى سرعة --
   int _peakDownloadSpeedBps = 0;
   int _peakUploadSpeedBps = 0;
-  // --------------------------------
-
   final String _gameId = '5833433';
   final String _rewardedPlacementId = 'Rewarded_Android';
   final String _interstitialPlacementId = 'Interstitial_Android';
-
   bool _isRewardedAdReady = false;
   bool _isInterstitialAdReady = false;
-
   Timer? _adLoadTimer;
+  String _vpnStatus = 'DISCONNECTED';
+  bool _isTestingSpeed = false;
+  double? _speedTestResultMbps;
+  double? _uploadSpeedTestResultMbps;
 
   final Uri _telegramUrl = Uri.parse('https://t.me/D_S_D_C1');
   final Uri _subscriptionUrl = Uri.parse('https://t.me/D_S_D_Cbot');
+  final Uri _developerUrl = Uri.parse('https://t.me/he_s_en');
 
   @override
   void initState() {
@@ -194,6 +206,20 @@ class _MyHomePageState extends State<MyHomePage> {
       _initializeUnityAds();
       _loadRewardedAd();
       _loadInterstitialAd();
+
+      FirebaseMessaging.instance.getToken().then((token) {
+        print("Firebase Messaging Token: $token");
+      });
+
+      FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+        print('Got a message whilst in the foreground!');
+        print('Message data: ${message.data}');
+
+        if (message.notification != null) {
+          print(
+              'Message also contained a notification: ${message.notification}');
+        }
+      });
     });
   }
 
@@ -201,7 +227,7 @@ class _MyHomePageState extends State<MyHomePage> {
     try {
       UnityAds.init(
         gameId: _gameId,
-        testMode: false, // Enable test mode for debugging
+        testMode: false,
         onComplete: () {
           print('Unity Ads initialization complete.');
           _loadRewardedAd();
@@ -237,7 +263,6 @@ class _MyHomePageState extends State<MyHomePage> {
 
     print("[_loadData] Starting data load process.");
 
-    // Load cached data first
     await _loadDataFromCache();
     print(
       "[_loadData] After loading from cache: Servers count = ${_vpnServers.length}, SNI profiles count = ${_sniProfiles.length}",
@@ -257,7 +282,6 @@ class _MyHomePageState extends State<MyHomePage> {
           _vpnServers = servers;
           _sniProfiles = profiles;
         });
-        // Save data to cache only if fetched successfully
         if (servers.isNotEmpty && profiles.isNotEmpty) {
           await _saveDataToCache();
           await prefs.setInt('last_fetch_time', currentTime);
@@ -272,7 +296,6 @@ class _MyHomePageState extends State<MyHomePage> {
       print("[_loadData] Using cached data (cache not expired).");
     }
 
-    // Ensure _vpnServers and _sniProfiles are never empty
     if (_vpnServers.isEmpty) {
       setState(() {
         _vpnServers = [
@@ -297,13 +320,12 @@ class _MyHomePageState extends State<MyHomePage> {
       "[_loadData] After ensuring non-empty lists: Servers count = ${_vpnServers.length}, SNI profiles count = ${_sniProfiles.length}",
     );
 
-    await _loadSelections(); // This will try to load saved selections first
+    await _loadSelections();
     print(
       "[_loadData] After _loadSelections: _selectedServer = ${_selectedServer?.name}, _selectedProfile = ${_selectedProfile?.name}",
     );
 
     setState(() {
-      // Ensure a default server/profile is selected if none or invalid saved
       if (_selectedServer == null && _vpnServers.isNotEmpty) {
         _selectedServer = _vpnServers.first;
         print(
@@ -316,17 +338,14 @@ class _MyHomePageState extends State<MyHomePage> {
           "[_loadData] Assigned first SNI as default: ${_selectedProfile?.name}",
         );
       }
-      // If still null, means no data was available at all, even default placeholder
       if (_selectedServer == null) {
-        _selectedServer =
-            _vpnServers.first; // Fallback to the 'No Servers' placeholder
+        _selectedServer = _vpnServers.first;
         print(
           "[_loadData] _selectedServer still null, fell back to placeholder: ${_selectedServer?.name}",
         );
       }
       if (_selectedProfile == null) {
-        _selectedProfile =
-            _sniProfiles.first; // Fallback to the 'No SNI' placeholder
+        _selectedProfile = _sniProfiles.first;
         print(
           "[_loadData] _selectedProfile still null, fell back to placeholder: ${_selectedProfile?.name}",
         );
@@ -340,7 +359,6 @@ class _MyHomePageState extends State<MyHomePage> {
       "[_loadData] Final selected profile: ${_selectedProfile?.name}, SNI: ${_selectedProfile?.sni}",
     );
 
-    // Re-initialize V2Ray after ensuring a valid server is selected
     if (_selectedServer != null && _getFinalUrl().isNotEmpty) {
       _initializeV2Ray();
       print("[_loadData] Calling _initializeV2Ray after data load.");
@@ -404,7 +422,6 @@ class _MyHomePageState extends State<MyHomePage> {
         );
       }
     }
-    // Do NOT set state here. Let _loadData handle final selection assignment.
     _selectedServer = foundServer;
     print("[_loadSelections] _selectedServer set to: ${_selectedServer?.name}");
 
@@ -419,7 +436,6 @@ class _MyHomePageState extends State<MyHomePage> {
         );
       }
     }
-    // Do NOT set state here. Let _loadData handle final selection assignment.
     _selectedProfile = foundProfile;
     print(
       "[_loadSelections] _selectedProfile set to: ${_selectedProfile?.name}",
@@ -438,13 +454,12 @@ class _MyHomePageState extends State<MyHomePage> {
 
   Future<void> _initializeV2Ray() async {
     final url = _getFinalUrl();
-    print("V2Ray - Final URL to initialize: $url"); // Added logging
+    print("V2Ray - Final URL to initialize: $url");
 
     if (_selectedServer == null || url.isEmpty) {
       print(
         "V2Ray initialization skipped: selected server is null or URL is invalid.",
       );
-      // No SnackBar here, as it might be normal if no servers are available
       return;
     }
 
@@ -467,15 +482,12 @@ class _MyHomePageState extends State<MyHomePage> {
     final previousState = _status?.state;
     final newState = newStatus.state;
 
-    // --- منطق تسجيل أعلى سرعة ---
     if (newState == 'CONNECTED') {
-      // إذا كان الاتصال قد بدأ للتو، قم بتصفير العدادات
       if (previousState != 'CONNECTED') {
         _peakDownloadSpeedBps = 0;
         _peakUploadSpeedBps = 0;
       }
 
-      // قم بتحديث أعلى سرعة إذا كانت السرعة الحالية أكبر
       if ((newStatus.downloadSpeed ?? 0) > _peakDownloadSpeedBps) {
         _peakDownloadSpeedBps = newStatus.downloadSpeed ?? 0;
       }
@@ -483,22 +495,22 @@ class _MyHomePageState extends State<MyHomePage> {
         _peakUploadSpeedBps = newStatus.uploadSpeed ?? 0;
       }
     }
-    // -------------------------
 
     if (mounted) {
       setState(() {
         _status = newStatus;
+        _vpnStatus = newStatus.state;
         _updateButtonState();
       });
     }
 
-    // --- منطق الإعلانات والمؤقت ---
     if (newState == 'CONNECTED' && previousState != 'CONNECTED') {
       _startTimer();
-      // تأخير عرض الإعلان البيني
+      // تأخير عرض الإعلان البيني وبدء فحص السرعة
       Future.delayed(const Duration(seconds: 2), () {
         if (mounted && _status?.state == 'CONNECTED') {
-          _showInterstitialAd();
+          _showInterstitialAd(); // سيحاول عرض الإعلان إذا كان جاهزاً
+          _runSpeedTest(); // سيبدأ فحص السرعة في كل الأحوال بعد المحاولة
         }
       });
     } else if (newState == 'DISCONNECTED' && previousState != 'DISCONNECTED') {
@@ -506,7 +518,6 @@ class _MyHomePageState extends State<MyHomePage> {
       _isExtendedConnection = false;
       _loadRewardedAd();
       _loadInterstitialAd();
-      // إعادة تصفير العدادات عند قطع الاتصال
       if (mounted) {
         setState(() {
           _peakDownloadSpeedBps = 0;
@@ -519,16 +530,16 @@ class _MyHomePageState extends State<MyHomePage> {
   void _updateButtonState() {
     switch (_status?.state) {
       case 'CONNECTED':
-        _buttonText = 'Disconnect'; // تغيير النص هنا ليكون أوضح
+        _buttonText = 'متصل';
         break;
       case 'CONNECTING':
-        _buttonText = 'Connecting...';
+        _buttonText = 'جاري الاتصال...';
         break;
       case 'DISCONNECTED':
-        _buttonText = 'Connect';
+        _buttonText = 'اتصال';
         break;
       default:
-        _buttonText = 'Connect';
+        _buttonText = 'اتصال';
         break;
     }
   }
@@ -537,17 +548,15 @@ class _MyHomePageState extends State<MyHomePage> {
     if (_status?.state == 'CONNECTED') {
       await _flutterV2ray.stopV2Ray();
     } else {
-      // إذا كان الإعلان جاهزاً، اعرضه
       if (_isRewardedAdReady) {
         _showRewardedAd();
       } else {
-        // الإعلان ليس جاهزاً، ابدأ مؤقت الـ 20 ثانية
         setState(() {
           _isAdLoading = true;
         });
-        _loadRewardedAd(); // حاول تحميل الإعلان مرة أخرى
+        _loadRewardedAd();
 
-        _adLoadTimer?.cancel(); // ألغِ أي مؤقت قديم
+        _adLoadTimer?.cancel();
         _adLoadTimer = Timer(const Duration(seconds: 20), () {
           print('Ad load timeout. Connecting directly...');
           if (mounted && _status?.state != 'CONNECTED') {
@@ -560,7 +569,7 @@ class _MyHomePageState extends State<MyHomePage> {
                 backgroundColor: Colors.green,
               ),
             );
-            _connectToVpn(); // <-- اتصل مباشرة بعد 20 ثانية
+            _connectToVpn();
           }
         });
       }
@@ -575,17 +584,16 @@ class _MyHomePageState extends State<MyHomePage> {
         Uri originalUri = Uri.parse(finalUrl);
         var queryParams = Map<String, String>.from(originalUri.queryParameters);
         queryParams['host'] = _selectedProfile!.sni;
-        queryParams['sni'] =
-            _selectedProfile!.sni; // Also update sni if present
+        queryParams['sni'] = _selectedProfile!.sni;
         finalUrl = originalUri.replace(queryParameters: queryParams).toString();
       } catch (e) {
         print(
           "Error parsing or replacing URL parts in _getFinalUrl: $e",
-        ); // Added logging
-        return _selectedServer!.url; // Fallback to original URL
+        );
+        return _selectedServer!.url;
       }
     }
-    print("V2Ray - Constructed final URL: $finalUrl"); // Added logging
+    print("V2Ray - Constructed final URL: $finalUrl");
     return finalUrl;
   }
 
@@ -604,15 +612,12 @@ class _MyHomePageState extends State<MyHomePage> {
 
   void _startTimer() {
     _timer?.cancel();
-    // This function is now only called after successfully watching an ad.
-    // _connectionTime is already set to 24 hours in _showRewardedAd.
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (_connectionTime > 0) {
         setState(() {
           _connectionTime--;
         });
       } else {
-        // Time is up, disconnect.
         timer.cancel();
         if (_status?.state == 'CONNECTED') {
           _toggleVpn();
@@ -628,17 +633,15 @@ class _MyHomePageState extends State<MyHomePage> {
     });
   }
 
-  String _formatSpeed(int? speedInBytes) {
-    if (_status?.state != 'CONNECTED' || speedInBytes == null) return '---';
-    if (speedInBytes == 0 && _connectionTime < 3) return '...';
+  String _formatSpeed(int? bps) {
+    if (bps == null || bps < 0) return '0.0 KB/s';
+    if (_vpnStatus != 'CONNECTED') return '---';
+    if (bps == 0 && _connectionTime < 3) return '...';
 
-    double speedInMbps = (speedInBytes /
-        (1024 * 1024) *
-        8); // Convert Bps to Mbps (1 Byte = 8 bits)
+    double speedInMbps = (bps / (1024 * 1024) * 8);
 
     if (speedInMbps < 0.1) {
-      // If less than 0.1 Mbps, show in KB/s for more precision
-      return '${(speedInBytes / 1024).toStringAsFixed(2)} KB/s';
+      return '${(bps / 1024).toStringAsFixed(2)} KB/s';
     } else {
       return '${speedInMbps.toStringAsFixed(2)} MB/s';
     }
@@ -654,15 +657,6 @@ class _MyHomePageState extends State<MyHomePage> {
           setState(() {
             _isRewardedAdReady = true;
           });
-
-          // --- التعديل هنا ---
-          // لا تقم بعرض الإعلان تلقائياً من هنا.
-          // فقط قم بتحديث الحالة، ودالة _toggleVpn هي المسؤولة عن العرض.
-          // if (_isAdLoading) {
-          //   _adLoadTimer?.cancel();
-          //   _showRewardedAd();
-          // }
-          // ------------------
         }
       },
       onFailed: (placementId, error, message) {
@@ -678,13 +672,13 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   void _loadInterstitialAd() {
-    _isInterstitialAdReady = false; // إعادة التعيين عند بدء التحميل
+    _isInterstitialAdReady = false;
     UnityAds.load(
       placementId: _interstitialPlacementId,
       onComplete: (placementId) {
         print('Load Complete: $placementId');
         setState(() {
-          _isInterstitialAdReady = true; // الإعلان أصبح جاهزاً
+          _isInterstitialAdReady = true;
         });
       },
       onFailed: (placementId, error, message) {
@@ -697,7 +691,7 @@ class _MyHomePageState extends State<MyHomePage> {
   void _showInterstitialAd() {
     if (!_isInterstitialAdReady) {
       print('Interstitial Ad not ready, skipping show.');
-      _loadInterstitialAd(); // حاول تحميله مرة أخرى بهدوء
+      _loadInterstitialAd();
       return;
     }
 
@@ -731,13 +725,13 @@ class _MyHomePageState extends State<MyHomePage> {
       placementId: _rewardedPlacementId,
       onComplete: (placementId) async {
         print('Video Ad ($placementId) completed');
-        _adLoadTimer?.cancel(); // <-- ألغِ المؤقت عند مشاهدة الإعلان
+        _adLoadTimer?.cancel();
         setState(() {
           _isExtendedConnection = true;
           _connectionTime = 24 * 60 * 60;
           _isAdLoading = false;
         });
-        _connectToVpn(); // <-- استخدم الدالة الجديدة للاتصال
+        _connectToVpn();
       },
       onFailed: (placementId, error, message) {
         print('Video Ad ($placementId) failed: $error - $message');
@@ -757,8 +751,6 @@ class _MyHomePageState extends State<MyHomePage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(message), backgroundColor: Colors.red),
       );
-
-      // إظهار للمستخدم أننا نحاول تحميل الإعلان مجدداً
       setState(() {
         _isAdLoading = true;
       });
@@ -793,7 +785,7 @@ class _MyHomePageState extends State<MyHomePage> {
                 _buildConnectButton(),
                 const Spacer(),
                 _buildConnectionDetails(),
-                const Spacer(flex: 2),
+                const Spacer(),
               ],
             ),
           ),
@@ -812,15 +804,19 @@ class _MyHomePageState extends State<MyHomePage> {
         onSelected: (value) {
           if (value == 'contact_us') {
             _launchUrl(_telegramUrl);
-          } else if (value == 'telegram') {
-            _launchUrl(_telegramUrl);
           } else if (value == 'subscribe') {
             _launchUrl(_subscriptionUrl);
+          } else if (value == 'developer') {
+            _launchUrl(_developerUrl);
           }
         },
         icon: Icon(Icons.menu, color: theme.iconTheme.color, size: 30),
         color: theme.cardColor,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(15),
+          side: const BorderSide(
+              color: Colors.blueAccent, width: 2), // Added border color
+        ),
         itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
           PopupMenuItem<String>(
             value: 'contact_us',
@@ -832,16 +828,6 @@ class _MyHomePageState extends State<MyHomePage> {
                 ),
                 const SizedBox(width: 12),
                 Text('Contact Us', style: theme.textTheme.bodyMedium),
-              ],
-            ),
-          ),
-          PopupMenuItem<String>(
-            value: 'telegram',
-            child: Row(
-              children: [
-                const Icon(Icons.telegram, color: Colors.blueAccent),
-                const SizedBox(width: 12),
-                Text('Join Telegram', style: theme.textTheme.bodyMedium),
               ],
             ),
           ),
@@ -862,10 +848,24 @@ class _MyHomePageState extends State<MyHomePage> {
               ],
             ),
           ),
+          const PopupMenuDivider(),
+          PopupMenuItem<String>(
+            value: 'developer',
+            child: Row(
+              children: [
+                Icon(
+                  Icons.code,
+                  color: Colors.purpleAccent, // Changed icon color
+                ),
+                const SizedBox(width: 12),
+                Text('7𝖊\$𝖊𝒏 :المطور', style: theme.textTheme.bodyMedium),
+              ],
+            ),
+          ),
         ],
       ),
       title: Text(
-        'WALEDSSH',
+        'WaledNet',
         style: theme.textTheme.headlineSmall?.copyWith(
           color: theme.colorScheme.onBackground,
           fontWeight: FontWeight.bold,
@@ -874,18 +874,16 @@ class _MyHomePageState extends State<MyHomePage> {
       actions: [
         IconButton(
           icon: const Icon(Icons.telegram, color: Colors.blueAccent),
-          iconSize: 30, // Increased size
+          iconSize: 30,
           onPressed: () => _launchUrl(_telegramUrl),
         ),
         IconButton(
           icon: Icon(
             themeProvider.isDarkMode
-                ? Icons
-                    .light_mode_outlined // In Dark mode, show Sun to switch to Light/Colorful
-                : Icons
-                    .dark_mode_outlined, // In Light/Colorful mode, show Moon to switch to Dark
+                ? Icons.light_mode_outlined
+                : Icons.dark_mode_outlined,
           ),
-          iconSize: 30, // Increased size
+          iconSize: 30,
           color: theme.iconTheme.color,
           onPressed: () => themeProvider.toggleTheme(),
         ),
@@ -903,25 +901,21 @@ class _MyHomePageState extends State<MyHomePage> {
     final Color disconnectedColor = theme.colorScheme.onSurface;
     final Color connectedColor = connectedBlueColor;
 
-    // --- تحديث منطق نص الزر ---
     String buttonTextToShow = _buttonText;
     if (_status?.state != 'CONNECTED' && _isAdLoading) {
       buttonTextToShow = 'جاري تحميل الإعلان...';
     }
-    // --------------------------
 
     return Column(
       children: [
         GestureDetector(
-          onTap: (_status?.state == 'CONNECTING' ||
-                  _isAdLoading ||
-                  _isLoading) // <-- تعطيل الزر أثناء التحميل
+          onTap: (_status?.state == 'CONNECTING' || _isAdLoading || _isLoading)
               ? null
               : _toggleVpn,
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 300),
-            width: 220,
-            height: 220,
+            width: 180, // Smaller button
+            height: 180, // Smaller button
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               color: theme.colorScheme.surface,
@@ -941,129 +935,98 @@ class _MyHomePageState extends State<MyHomePage> {
             ),
             child: Center(
               child: (_isLoading || (_isAdLoading && !isConnected))
-                  ? const CircularProgressIndicator() // إظهار مؤشر تحميل
+                  ? const CircularProgressIndicator()
                   : Icon(
                       Icons.power_settings_new_rounded,
-                      size: 80,
+                      size: 70, // Smaller icon
                       color: isConnected ? connectedColor : disconnectedColor,
                     ),
             ),
           ),
         ),
-        const SizedBox(height: 32),
+        const SizedBox(height: 24), // Reduced space
         Text(
-          buttonTextToShow, // <-- استخدام النص المحدث
+          buttonTextToShow,
           style: theme.textTheme.labelLarge?.copyWith(
             color: isConnected ? connectedColor : disconnectedColor,
             letterSpacing: 1.5,
-            fontSize: 22,
+            fontSize: 20, // Smaller text
           ),
         ),
-        const SizedBox(height: 50.0), // Use a fixed SizedBox for spacing
-        if (isConnected) // Conditionally display the time unit
+        const SizedBox(height: 16.0), // Reduced space
+        if (isConnected)
           Center(
-            child: Column(
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.baseline,
+              textBaseline: TextBaseline.alphabetic,
               children: [
-                const SizedBox(height: 8), // Padding above the unit text
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    // Hours
-                    Column(
-                      children: [
-                        Text(
-                          (_connectionTime ~/ 3600)
-                              .toString()
-                              .padLeft(2, '0'), // Hours
-                          style: GoogleFonts.montserrat(
-                            fontSize: 52, // Make it large
-                            fontWeight: FontWeight.w500, // Not bold
-                            color: Colors.grey, // Set color to grey
-                          ),
-                        ),
-                        Text(
-                          'ساعة',
-                          style: theme.textTheme.labelMedium?.copyWith(
-                            color: isConnected
-                                ? connectedColor
-                                : disconnectedColor,
-                            letterSpacing: 1.5,
-                            fontSize: 16,
-                          ),
-                        ),
-                      ],
-                    ),
-                    Text(
-                      ':',
-                      style: GoogleFonts.montserrat(
-                        fontSize: 52, // Make it large
-                        fontWeight: FontWeight.w500, // Not bold
-                        color: Colors.grey, // Set color to grey
-                      ),
-                    ),
-                    // Minutes
-                    Column(
-                      children: [
-                        Text(
-                          ((_connectionTime % 3600) ~/ 60)
-                              .toString()
-                              .padLeft(2, '0'), // Minutes
-                          style: GoogleFonts.montserrat(
-                            fontSize: 52, // Make it large
-                            fontWeight: FontWeight.w500, // Not bold
-                            color: Colors.grey, // Set color to grey
-                          ),
-                        ),
-                        Text(
-                          'دقايق',
-                          style: theme.textTheme.labelMedium?.copyWith(
-                            color: isConnected
-                                ? connectedColor
-                                : disconnectedColor,
-                            letterSpacing: 1.5,
-                            fontSize: 16,
-                          ),
-                        ),
-                      ],
-                    ),
-                    Text(
-                      ':',
-                      style: GoogleFonts.montserrat(
-                        fontSize: 52, // Make it large
-                        fontWeight: FontWeight.w500, // Not bold
-                        color: Colors.grey, // Set color to grey
-                      ),
-                    ),
-                    // Seconds
-                    Column(
-                      children: [
-                        Text(
-                          (_connectionTime % 60)
-                              .toString()
-                              .padLeft(2, '0'), // Seconds
-                          style: GoogleFonts.montserrat(
-                            fontSize: 52, // Make it large
-                            fontWeight: FontWeight.w500, // Not bold
-                            color: Colors.grey, // Set color to grey
-                          ),
-                        ),
-                        Text(
-                          'ثواني',
-                          style: theme.textTheme.labelMedium?.copyWith(
-                            color: isConnected
-                                ? connectedColor
-                                : disconnectedColor,
-                            letterSpacing: 1.5,
-                            fontSize: 16,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
+                _buildTimeColumn(
+                    (_connectionTime ~/ 3600).toString().padLeft(2, '0'),
+                    'ساعة',
+                    theme,
+                    isConnected,
+                    connectedColor,
+                    disconnectedColor),
+                _buildTimeSeparator(theme),
+                _buildTimeColumn(
+                    ((_connectionTime % 3600) ~/ 60).toString().padLeft(2, '0'),
+                    'دقايق',
+                    theme,
+                    isConnected,
+                    connectedColor,
+                    disconnectedColor),
+                _buildTimeSeparator(theme),
+                _buildTimeColumn(
+                    (_connectionTime % 60).toString().padLeft(2, '0'),
+                    'ثواني',
+                    theme,
+                    isConnected,
+                    connectedColor,
+                    disconnectedColor),
               ],
             ),
           ),
+      ],
+    );
+  }
+
+  Widget _buildTimeSeparator(ThemeData theme) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4.0),
+      child: Text(
+        ':',
+        style: TextStyle(
+          fontFamily: 'Montserrat', // Use local font
+          fontSize: 40,
+          fontWeight: FontWeight.w500,
+          color: Colors.grey,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTimeColumn(String timeValue, String label, ThemeData theme,
+      bool isConnected, Color connectedColor, Color disconnectedColor) {
+    return Column(
+      children: [
+        Text(
+          timeValue,
+          style: TextStyle(
+            fontFamily: 'Montserrat', // Use local font
+            fontSize: 40,
+            fontWeight: FontWeight.w500,
+            color: Colors.grey,
+          ),
+        ),
+        Text(
+          label,
+          style: theme.textTheme.labelMedium?.copyWith(
+            color: isConnected ? connectedColor : disconnectedColor,
+            letterSpacing: 1.5,
+            fontSize: 14,
+          ),
+        ),
       ],
     );
   }
@@ -1123,7 +1086,6 @@ class _MyHomePageState extends State<MyHomePage> {
     final theme = Theme.of(context);
     final themeProvider = Provider.of<ThemeProvider>(context, listen: false);
 
-    // --- GUARANTEED HIGH CONTRAST COLORS ---
     final Color highContrastIconColor = themeProvider.isDarkMode
         ? theme.colorScheme.primary
         : theme.colorScheme.primary;
@@ -1132,19 +1094,18 @@ class _MyHomePageState extends State<MyHomePage> {
         (items.length == 1 && (items.first as dynamic).name == 'Loading...');
 
     return Container(
-      height: 60, // Increased height for a better feel
-      padding: const EdgeInsets.symmetric(horizontal: 20), // Adjusted padding
+      height: 60,
+      padding: const EdgeInsets.symmetric(horizontal: 20),
       decoration: BoxDecoration(
         color: theme.cardTheme.color,
         borderRadius: BorderRadius.circular(20),
         border: themeProvider.isDarkMode &&
-                theme.primaryColor ==
-                    const Color(0xFFAD1457) // Colorful mode only
+                theme.primaryColor == const Color(0xFFAD1457)
             ? Border.all(
                 color: theme.colorScheme.secondary.withOpacity(0.3),
                 width: 1.5,
               )
-            : null, // No border in classic dark or light mode
+            : null,
         boxShadow: theme.brightness == Brightness.light
             ? [
                 BoxShadow(
@@ -1162,8 +1123,8 @@ class _MyHomePageState extends State<MyHomePage> {
             icon,
             color: highContrastIconColor,
             size: 24,
-          ), // GUARANTEED CONTRAST
-          const SizedBox(width: 16), // Increased spacing
+          ),
+          const SizedBox(width: 16),
           Expanded(
             child: DropdownButtonHideUnderline(
               child: DropdownButton<T>(
@@ -1175,14 +1136,13 @@ class _MyHomePageState extends State<MyHomePage> {
                     color: theme.textTheme.bodyMedium?.color?.withOpacity(0.7),
                   ),
                 ),
-                dropdownColor:
-                    theme.cardTheme.color, // Dropdown is same color as card
+                dropdownColor: theme.cardTheme.color,
                 icon: Icon(
                   Icons.keyboard_arrow_down,
                   color: highContrastIconColor,
-                ), // GUARANTEED CONTRAST
+                ),
                 items: items.map<DropdownMenuItem<T>>(itemBuilder).toList(),
-                onChanged: isDisabled ? null : onChanged, // تعطيل القائمة
+                onChanged: isDisabled ? null : onChanged,
                 style: theme.textTheme.bodyLarge,
               ),
             ),
@@ -1194,41 +1154,30 @@ class _MyHomePageState extends State<MyHomePage> {
 
   Widget _buildStatusDetails() {
     final themeProvider = Provider.of<ThemeProvider>(context, listen: false);
-    final theme = themeProvider.themeData; // Ensure theme is accessible
+    final theme = themeProvider.themeData;
 
     return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      mainAxisAlignment: MainAxisAlignment.center,
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         Expanded(
+          flex: 5,
           child: _buildInfoCard(
             icon: Icons.arrow_downward,
             label: 'Download',
-            value: _formatSpeed(_peakDownloadSpeedBps), // <-- استخدام أعلى سرعة
             color: themeProvider.isDarkMode
                 ? Colors.blueAccent
                 : theme.colorScheme.primary,
           ),
         ),
-        if (_status?.state ==
-            'CONNECTED') // Show refresh button only when connected
-          IconButton(
-            icon: Icon(Icons.refresh, color: theme.colorScheme.onBackground),
-            onPressed: () {
-              setState(() {
-                _peakDownloadSpeedBps = 0;
-                _peakUploadSpeedBps = 0;
-              });
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('تم إعادة ضبط قراءات السرعة.')),
-              );
-            },
-          ),
-        const SizedBox(width: 16),
+        const Spacer(flex: 2),
+        if (_vpnStatus == 'CONNECTED') _buildSpeedTestButton(),
+        const Spacer(flex: 2),
         Expanded(
+          flex: 5,
           child: _buildInfoCard(
             icon: Icons.arrow_upward,
             label: 'Upload',
-            value: _formatSpeed(_peakUploadSpeedBps), // <-- استخدام أعلى سرعة
             color: themeProvider.isDarkMode
                 ? Colors.pinkAccent
                 : theme.colorScheme.secondary,
@@ -1238,47 +1187,105 @@ class _MyHomePageState extends State<MyHomePage> {
     );
   }
 
+  Widget _buildSpeedTestButton() {
+    final theme = Theme.of(context);
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        IconButton(
+          iconSize: 36,
+          splashRadius: 28,
+          tooltip: 'إعادة فحص السرعة',
+          onPressed: _isTestingSpeed ? null : _runSpeedTest,
+          icon: _isTestingSpeed
+              ? SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2.5,
+                    color: theme.colorScheme.primary,
+                  ),
+                )
+              : Icon(
+                  Icons.speed_rounded,
+                  color: theme.colorScheme.onSurface.withOpacity(0.8),
+                ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'فحص السرعة',
+          style: theme.textTheme.labelMedium,
+        ),
+      ],
+    );
+  }
+
   Widget _buildInfoCard({
     required IconData icon,
     required String label,
-    required String value,
     required Color color,
   }) {
     final theme = Theme.of(context);
-    final themeProvider = Provider.of<ThemeProvider>(context, listen: false);
+    final themeProvider = Provider.of<ThemeProvider>(context);
 
-    return Card(
-      // No need for SizedBox with width anymore
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          children: [
-            Icon(icon, color: color, size: 30),
-            const SizedBox(height: 12),
-            Text(
-              label.toUpperCase(),
-              style: theme.textTheme.bodyMedium?.copyWith(
-                fontWeight: FontWeight.bold,
-                letterSpacing: 1.2,
-                color: theme.colorScheme.onSurface.withOpacity(
-                  0.6,
-                ), // Standard secondary text
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              value,
-              style: theme.textTheme.headlineSmall?.copyWith(
-                fontWeight: FontWeight.bold,
-                color: themeProvider.isDarkMode
-                    ? const Color(0xFFFFC107) // RESTORED Gold for Dark Mode
-                    : theme
-                        .colorScheme.onSurface, // Standard primary text on card
-              ),
-            ),
-          ],
-        ),
+    // Set text color to white in light mode, otherwise use theme default
+    final Color? textColor = !themeProvider.isDarkMode ? Colors.white : null;
+
+    // Removed Card widget for no background
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8.0),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(icon, size: 28.0, color: color), // Slightly smaller icon
+          const SizedBox(height: 8.0),
+          Text(
+            label,
+            style: theme.textTheme.bodyMedium?.copyWith(color: textColor),
+          ),
+          const SizedBox(height: 4.0),
+          _buildSpeedInfoWidget(label, themeProvider.isDarkMode),
+        ],
       ),
+    );
+  }
+
+  Widget _buildSpeedInfoWidget(String label, bool isDarkMode) {
+    final theme = Theme.of(context);
+
+    if (_isTestingSpeed) {
+      return const SizedBox(
+        height: 20,
+        width: 20,
+        child: CircularProgressIndicator(strokeWidth: 2.0),
+      );
+    }
+
+    String textToShow = "-"; // Changed from "N/A Mbps" to "-"
+    double? result;
+    // Set text color to white in light mode for both download and upload
+    final Color? textColor = !isDarkMode ? Colors.white : null;
+
+    if (label == 'Download') {
+      result = _speedTestResultMbps;
+    } else if (label == 'Upload') {
+      result = _uploadSpeedTestResultMbps;
+    }
+
+    if (result != null) {
+      if (result == -1) {
+        textToShow = "Error";
+      } else {
+        textToShow = '${result.toStringAsFixed(2)} Mbps';
+      }
+    }
+
+    return Text(
+      textToShow,
+      style: theme.textTheme.bodyLarge?.copyWith(
+        fontWeight: FontWeight.bold,
+        color: textColor,
+      ), // Smaller font for speed
     );
   }
 
@@ -1307,5 +1314,63 @@ class _MyHomePageState extends State<MyHomePage> {
     _timer?.cancel();
     _adLoadTimer?.cancel();
     super.dispose();
+  }
+
+  Future<void> _runSpeedTest() async {
+    if (_isTestingSpeed) return;
+
+    setState(() {
+      _isTestingSpeed = true;
+      _speedTestResultMbps = null;
+      _uploadSpeedTestResultMbps = null;
+    });
+
+    final dio = Dio();
+
+    // --- DOWNLOAD TEST ---
+    try {
+      const downloadUrl = 'http://cachefly.cachefly.net/10mb.test';
+      final downloadStopwatch = Stopwatch()..start();
+      final response = await dio.get(downloadUrl,
+          options: Options(responseType: ResponseType.bytes));
+      downloadStopwatch.stop();
+      final duration = downloadStopwatch.elapsed;
+      final contentLength = response.data.length;
+
+      if (duration.inMilliseconds > 0 && contentLength > 0) {
+        final speedBps = (contentLength * 8) / (duration.inMilliseconds / 1000);
+        final speedMbps = speedBps / (1024 * 1024);
+        if (mounted) setState(() => _speedTestResultMbps = speedMbps);
+      }
+    } catch (e) {
+      print('[DownloadSpeedTest] Error: $e');
+      if (mounted) setState(() => _speedTestResultMbps = -1);
+    }
+
+    // --- UPLOAD TEST ---
+    try {
+      final payloadSize = 2 * 1024 * 1024; // 2MB
+      final dummyPayload = Uint8List(payloadSize);
+      const uploadUrl = 'https://httpbin.org/post';
+      final uploadStopwatch = Stopwatch()..start();
+
+      await dio.post(uploadUrl, data: dummyPayload);
+
+      uploadStopwatch.stop();
+      final uploadDuration = uploadStopwatch.elapsed;
+
+      if (uploadDuration.inMilliseconds > 0) {
+        final uploadSpeedBps =
+            (payloadSize * 8) / (uploadDuration.inMilliseconds / 1000);
+        final uploadSpeedMbps = uploadSpeedBps / (1024 * 1024);
+        if (mounted)
+          setState(() => _uploadSpeedTestResultMbps = uploadSpeedMbps);
+      }
+    } catch (e) {
+      print('[UploadSpeedTest] Error: $e');
+      if (mounted) setState(() => _uploadSpeedTestResultMbps = -1);
+    } finally {
+      if (mounted) setState(() => _isTestingSpeed = false);
+    }
   }
 }
