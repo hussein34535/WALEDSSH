@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../../design/images.dart';
-
 class LocationWidget extends StatefulWidget {
   const LocationWidget({super.key});
 
@@ -41,7 +39,7 @@ class LocationWidgetState extends State<LocationWidget> {
             ],
           ),
           const Spacer(),
-          deFlag,
+          Icon(Icons.flag),
         ],
       ),
     );

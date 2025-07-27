@@ -2,7 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:vpn_client/design/colors.dart';
 import 'package:vpn_client/design/dimensions.dart';
-import 'package:vpnclient_controller_flutter/main.dart';
+import 'package:vpnclient_engine_flutter/vpnclient_engine_flutter.dart';
 
 class MainBtn extends StatefulWidget {
   const MainBtn({super.key});
@@ -61,6 +61,7 @@ class MainBtnState extends State<MainBtn> with SingleTickerProviderStateMixin {
   }
 
   Future<void> _handleConnection() async {
+    print('Connect button pressed. Current status: $connectionStatus');
     setState(() {
       if (connectionStatus == connectionStatusConnected) {
         connectionStatus = connectionStatusDisconnecting;
@@ -71,26 +72,28 @@ class MainBtnState extends State<MainBtn> with SingleTickerProviderStateMixin {
     });
 
     if (connectionStatus == connectionStatusConnecting) {
+      print('Initiating VPN connection...');
       _animationController.repeat(reverse: true);
-      await Controller.connect();
+      await VPNclientEngine.connect(subscriptionIndex: 0, serverIndex: 0);
       startTimer();
       setState(() {
         connectionStatus = connectionStatusConnected;
+        print('VPN tunnel started successfully!');
       });
       await _animationController.forward();
       _animationController.stop();
     } else if (connectionStatus == connectionStatusDisconnecting) {
+      print('Initiating VPN disconnection...');
       _animationController.repeat(reverse: true);
       stopTimer();
-      await Controller.disconnect();
+      await VPNclientEngine.disconnect();
       setState(() {
         connectionStatus = connectionStatusDisconnected;
+        print('VPN disconnected.');
       });
       await _animationController.reverse();
       _animationController.stop();
     }
-
-
   }
 
   @override
@@ -102,10 +105,9 @@ class MainBtnState extends State<MainBtn> with SingleTickerProviderStateMixin {
           style: TextStyle(
             fontSize: 40,
             fontWeight: FontWeight.w600,
-            color:
-                connectionStatus == connectionStatusConnected
-                    ? Theme.of(context).colorScheme.primary
-                    : Theme.of(context).colorScheme.secondary,
+            color: connectionStatus == connectionStatusConnected
+                ? Theme.of(context).colorScheme.primary
+                : Theme.of(context).colorScheme.secondary,
           ),
         ),
         const SizedBox(height: 70),
@@ -163,5 +165,9 @@ class MainBtnState extends State<MainBtn> with SingleTickerProviderStateMixin {
 }
 
 void main() {
-  runApp(MaterialApp(home: Scaffold(body: Center(child: MainBtn()))));
+  runApp(
+    MaterialApp(
+      home: Scaffold(body: Center(child: MainBtn())),
+    ),
+  );
 }
