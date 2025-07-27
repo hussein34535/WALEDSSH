@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 final ThemeData lightTheme = ThemeData(
-  colorScheme: ColorScheme.light(
+  colorScheme: const ColorScheme.light(
     primary: Color(0xFF303F49),
     secondary: Color(0xFFA2A2A2),
     surface: Color(0xFFF8F9FA),
@@ -12,7 +12,7 @@ final ThemeData lightTheme = ThemeData(
 );
 
 final ThemeData darkTheme = ThemeData(
-  colorScheme: ColorScheme.dark(
+  colorScheme: const ColorScheme.dark(
     primary: Color(0xFFA8C7FC),
     secondary: Color(0xFFA2A2A2),
     surface: Color(0xFFF8F9FA),
@@ -22,7 +22,7 @@ final ThemeData darkTheme = ThemeData(
   ),
 );
 
-final LinearGradient mainGradient = LinearGradient(
+const LinearGradient mainGradient = LinearGradient(
   colors: [Color(0xFF00C6FB), Color(0xFF005BEA)],
   begin: Alignment.topCenter,
   end: Alignment.bottomCenter,
