@@ -257,43 +257,40 @@ class _MyHomePageState extends State<MyHomePage> {
 
   Future<void> _loadData() async {
     final prefs = await SharedPreferences.getInstance();
-    final lastFetchTime = prefs.getInt('last_fetch_time') ?? 0;
     final currentTime = DateTime.now().millisecondsSinceEpoch;
-    final oneDay = 24 * 60 * 60 * 1000;
 
     print("[_loadData] Starting data load process.");
 
-    await _loadDataFromCache();
-    print(
-      "[_loadData] After loading from cache: Servers count = ${_vpnServers.length}, SNI profiles count = ${_sniProfiles.length}",
-    );
-
-    if (currentTime - lastFetchTime > oneDay ||
-        _vpnServers.isEmpty ||
-        _sniProfiles.isEmpty) {
+    bool fetchedFromApi = false;
+    try {
       print(
-        "[_loadData] Fetching new data from server (cache expired or empty lists)...",
+        "[_loadData] Attempting to fetch new data from server...",
       );
-      try {
-        final servers = await ApiService.fetchVlessServers();
-        final profiles = await ApiService.fetchSniProfiles();
+      final servers = await ApiService.fetchVlessServers();
+      final profiles = await ApiService.fetchSniProfiles();
 
+      if (servers.isNotEmpty && profiles.isNotEmpty) {
         setState(() {
           _vpnServers = servers;
           _sniProfiles = profiles;
         });
-        if (servers.isNotEmpty && profiles.isNotEmpty) {
-          await _saveDataToCache();
-          await prefs.setInt('last_fetch_time', currentTime);
-          print("[_loadData] Data fetched from API and saved to cache.");
-        }
-      } catch (e) {
-        print(
-          "[_loadData] Error fetching new data, using cached data if available: $e",
-        );
+        await _saveDataToCache();
+        await prefs.setInt('last_fetch_time', currentTime);
+        print("[_loadData] Data fetched from API and saved to cache.");
+        fetchedFromApi = true;
+      } else {
+        print("[_loadData] API returned empty lists, trying cache.");
       }
-    } else {
-      print("[_loadData] Using cached data (cache not expired).");
+    } catch (e) {
+      print(
+          "[_loadData] Error fetching new data from API: $e. Falling back to cache.");
+    }
+
+    if (!fetchedFromApi) {
+      await _loadDataFromCache();
+      print(
+        "[_loadData] After loading from cache: Servers count = ${_vpnServers.length}, SNI profiles count = ${_sniProfiles.length}",
+      );
     }
 
     if (_vpnServers.isEmpty) {
@@ -516,8 +513,8 @@ class _MyHomePageState extends State<MyHomePage> {
     } else if (newState == 'DISCONNECTED' && previousState != 'DISCONNECTED') {
       _stopTimer();
       _isExtendedConnection = false;
-      _loadRewardedAd();
-      _loadInterstitialAd();
+      // Removed _loadRewardedAd();
+      // Removed _loadInterstitialAd();
       if (mounted) {
         setState(() {
           _peakDownloadSpeedBps = 0;
@@ -554,18 +551,24 @@ class _MyHomePageState extends State<MyHomePage> {
         setState(() {
           _isAdLoading = true;
         });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('جاري تحميل الإعلان...'),
+            backgroundColor: Colors.orange,
+          ),
+        );
         _loadRewardedAd();
 
+        // Start a 20-second timer for ad loading
         _adLoadTimer?.cancel();
         _adLoadTimer = Timer(const Duration(seconds: 20), () {
-          print('Ad load timeout. Connecting directly...');
-          if (mounted && _status?.state != 'CONNECTED') {
+          if (mounted && !_isRewardedAdReady && _status?.state != 'CONNECTED') {
             setState(() {
               _isAdLoading = false;
             });
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
-                content: Text('فشل تحميل الإعلان. جاري الاتصال مباشرة...'),
+                content: Text('فشل تحميل الإعلان، جاري الاتصال مباشرة...'),
                 backgroundColor: Colors.green,
               ),
             );
@@ -657,6 +660,13 @@ class _MyHomePageState extends State<MyHomePage> {
           setState(() {
             _isRewardedAdReady = true;
           });
+          _adLoadTimer?.cancel(); // Cancel the timer if ad loads successfully
+          if (_isAdLoading) {
+            _showRewardedAd();
+            setState(() {
+              _isAdLoading = false;
+            });
+          }
         }
       },
       onFailed: (placementId, error, message) {
@@ -666,7 +676,13 @@ class _MyHomePageState extends State<MyHomePage> {
           setState(() {
             _isAdLoading = false;
           });
+          if (_adLoadTimer != null && _adLoadTimer!.isActive) {
+            _adLoadTimer?.cancel();
+            print('Ad load failed, connecting directly...');
+            _connectToVpn();
+          }
         }
+        _handleAdFailure('فشل تحميل الإعلان، يرجى المحاولة مرة أخرى.');
       },
     );
   }
@@ -691,7 +707,7 @@ class _MyHomePageState extends State<MyHomePage> {
   void _showInterstitialAd() {
     if (!_isInterstitialAdReady) {
       print('Interstitial Ad not ready, skipping show.');
-      _loadInterstitialAd();
+      // No need to call _loadInterstitialAd here, it will be handled by the main logic.
       return;
     }
 
@@ -699,17 +715,17 @@ class _MyHomePageState extends State<MyHomePage> {
       placementId: _interstitialPlacementId,
       onComplete: (placementId) {
         print('Video Ad ($placementId) completed');
-        _loadInterstitialAd();
+        // Removed _loadInterstitialAd();
       },
       onFailed: (placementId, error, message) {
         print('Video Ad ($placementId) failed: $error $message');
-        _loadInterstitialAd();
+        // Removed _loadInterstitialAd();
       },
       onStart: (placementId) => print('Video Ad ($placementId) start'),
       onClick: (placementId) => print('Video Ad ($placementId) click'),
       onSkipped: (placementId) {
         print('Video Ad ($placementId) skipped');
-        _loadInterstitialAd();
+        // Removed _loadInterstitialAd();
       },
     );
   }
@@ -717,7 +733,7 @@ class _MyHomePageState extends State<MyHomePage> {
   void _showRewardedAd() {
     if (!_isRewardedAdReady) {
       _handleAdFailure('الإعلان غير جاهز بعد، يرجى المحاولة مرة أخرى.');
-      _loadRewardedAd();
+      // Removed _loadRewardedAd(); // This was already handled in a previous commit, but ensuring it's not re-added.
       return;
     }
 
@@ -725,7 +741,6 @@ class _MyHomePageState extends State<MyHomePage> {
       placementId: _rewardedPlacementId,
       onComplete: (placementId) async {
         print('Video Ad ($placementId) completed');
-        _adLoadTimer?.cancel();
         setState(() {
           _isExtendedConnection = true;
           _connectionTime = 24 * 60 * 60;
@@ -742,6 +757,7 @@ class _MyHomePageState extends State<MyHomePage> {
       onSkipped: (placementId) {
         print('Video Ad ($placementId) skipped');
         _handleAdFailure('يجب مشاهدة الإعلان بالكامل للاتصال');
+        // Removed _loadRewardedAd();
       },
     );
   }
@@ -752,9 +768,10 @@ class _MyHomePageState extends State<MyHomePage> {
         SnackBar(content: Text(message), backgroundColor: Colors.red),
       );
       setState(() {
-        _isAdLoading = true;
+        _isAdLoading =
+            false; // Set to false to indicate no active ad loading attempt
       });
-      _loadRewardedAd();
+      // Removed _loadRewardedAd() here to prevent continuous loading attempts
     }
   }
 
@@ -1295,6 +1312,12 @@ class _MyHomePageState extends State<MyHomePage> {
     if (await _flutterV2ray.requestPermission()) {
       PackageInfo packageInfo = await PackageInfo.fromPlatform();
       String packageName = packageInfo.packageName;
+
+      setState(() {
+        _isExtendedConnection = true;
+        _connectionTime =
+            24 * 60 * 60; // Set to 24 hours (or desired extended time)
+      });
 
       await _flutterV2ray.startV2Ray(
         remark: _remark,
